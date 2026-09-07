@@ -229,6 +229,13 @@ code,.mono{font-family:var(--mono)}
 .as-arch__component-body{display:flex; flex-direction:column; line-height:1.3}
 .as-arch__component-body strong{font-size:12.5px}
 .as-arch__component-body em{font-size:11px; color:var(--text-dim); font-style:normal}
+.as-arch__versions{margin-top:16px}
+.as-arch__version-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px}
+.as-arch__version{display:flex; flex-direction:column; gap:2px; background:var(--bg-elev-2);
+  border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 11px; line-height:1.3}
+.as-arch__version-name{font-size:12.5px; font-weight:600}
+.as-arch__version-num{font-size:13px; color:var(--accent); font-variant-numeric:tabular-nums}
+.as-arch__version-cat{font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.05em}
 
 /* Design-pattern module */
 .as-dp{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:18px}
@@ -495,6 +502,11 @@ a.as-chip:hover{opacity:.8}
 .arch-component{display:inline-flex; align-items:center; gap:5px; background:var(--bg-elev-2);
   border:1px solid var(--border); border-radius:var(--radius-sm); padding:4px 10px; font-size:12px}
 .comp-icon{font-size:14px}
+.arch-versions{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
+.arch-version{display:inline-flex; align-items:baseline; gap:6px; background:var(--bg-elev-2);
+  border:1px solid var(--border); border-radius:var(--radius-sm); padding:4px 10px; font-size:12px}
+.arch-version__name{color:var(--text)}
+.arch-version__num{color:var(--accent); font-family:var(--mono); font-size:11.5px; font-weight:600}
 
 
 /* OOP vs POP — ArchSwiftScope report style */

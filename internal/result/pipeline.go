@@ -203,6 +203,15 @@ func runModules(scan *scanner.ScanResult, files []*parser.ParsedFile, step func(
 		if len(pfs) == 0 {
 			continue
 		}
+		// Hand the architecture module the manifest-detected versions for this
+		// platform via the Extra bag (same channel Go member data uses), keyed
+		// by the real language platform rather than a folder-as-tab synthetic key.
+		if vs := scan.Versions[pg.LanguagePlatform]; len(vs) > 0 {
+			if pfs[0].Extra == nil {
+				pfs[0].Extra = map[string]any{}
+			}
+			pfs[0].Extra["versions"] = vs
+		}
 		langIDs := map[string]bool{}
 		for _, f := range pfs {
 			langIDs[f.LanguageID] = true

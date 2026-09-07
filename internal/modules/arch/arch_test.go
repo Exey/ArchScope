@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/exey/archscope/internal/parser"
+	"github.com/exey/archscope/internal/scanner"
 
 	// Register language specs so Client flags (swift = client) are populated;
 	// the module switches to layered mode for non-client languages.
@@ -80,5 +81,35 @@ func TestEmptyInputRendersGracefully(t *testing.T) {
 	out := (Module{}).RenderHTML((Module{}).Analyze(nil))
 	if !strings.Contains(out, "as-empty") {
 		t.Errorf("expected empty-state note, got: %s", out)
+	}
+}
+
+func TestVersionsBlockRendered(t *testing.T) {
+	// client platform (Swift) with versions stashed on Extra, backend (Go) too.
+	for _, lang := range []string{"swift", "go"} {
+		f := pf("App/Thing."+lang, lang, 20, nil, cls("Thing"))
+		f.Extra = map[string]any{"versions": []scanner.Version{
+			{Name: "React", Version: "19.2", Category: "framework", Source: "package.json"},
+			{Name: "TypeScript", Version: "5.9", Category: "language", Source: "package.json"},
+		}}
+		res := (Module{}).Analyze([]*parser.ParsedFile{f})
+		out := (Module{}).RenderHTML(res)
+		if !strings.Contains(out, "as-arch__versions") || !strings.Contains(out, "React") || !strings.Contains(out, "19.2") {
+			t.Errorf("[%s] versions block missing:\n%s", lang, out)
+		}
+		md := (Module{}).RenderMarkdown(res)
+		if !strings.Contains(md, "#### Versions") || !strings.Contains(md, "TypeScript") {
+			t.Errorf("[%s] markdown versions section missing:\n%s", lang, md)
+		}
+		cards := (Module{}).SummaryCards(res)
+		gotCard := false
+		for _, c := range cards {
+			if c.Label == "TypeScript" && c.Num == "5.9" {
+				gotCard = true
+			}
+		}
+		if !gotCard {
+			t.Errorf("[%s] expected a TypeScript 5.9 summary card, got %+v", lang, cards)
+		}
 	}
 }

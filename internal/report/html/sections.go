@@ -3657,14 +3657,22 @@ func renderPlatformPanel(res *result.AnalysisResult, pg *scanner.PlatformGroup) 
 	badge := platBadgeHTML(pg)
 
 	// 1. 🏛️ Architecture
-	if layersHTML := renderArchLayers(files); layersHTML != "" {
-		techSet := buildTechSet(res, files)
-		componentsHTML := renderArchComponents(files, techSet)
-		fmt.Fprintf(&b, `<div class="as-section" id="%s"><div class="as-section__head">%s<span class="ico">🏛️</span><h3>Architecture</h3></div>`,
-			esc(cultAnchorID("arch", pg.Platform)), badge)
-		b.WriteString(layersHTML)
-		b.WriteString(componentsHTML)
-		b.WriteString(`</div>`)
+	{
+		lp := pg.LanguagePlatform
+		if lp == "" {
+			lp = pg.Platform
+		}
+		layersHTML := renderArchLayers(files)
+		componentsHTML := renderArchComponents(files, buildTechSet(res, files))
+		versionsHTML := renderArchVersions(res.Scan.Versions[lp])
+		if layersHTML != "" || componentsHTML != "" || versionsHTML != "" {
+			fmt.Fprintf(&b, `<div class="as-section" id="%s"><div class="as-section__head">%s<span class="ico">🏛️</span><h3>Architecture</h3></div>`,
+				esc(cultAnchorID("arch", pg.Platform)), badge)
+			b.WriteString(layersHTML)
+			b.WriteString(componentsHTML)
+			b.WriteString(versionsHTML)
+			b.WriteString(`</div>`)
+		}
 	}
 
 	// 2. 🎯 Domain Model

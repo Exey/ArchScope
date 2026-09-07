@@ -50,16 +50,17 @@ type ScanResult struct {
 	Root           string
 	Files          []FileEntry
 	Platforms      map[langspec.Platform]*PlatformGroup
-	Modules        map[string][]FileEntry // moduleName -> files
-	GitRepos       []string               // dirs containing .git
-	ProjectTypes   []string               // distinct detected project types, sorted
-	Technologies   []string               // tech detected from docker-compose/go.mod/Makefile
-	DockerServices []string               // service names from docker-compose files
-	DevOpsTools    []DevOpsTool           // CI/CD, container, orchestration tools
-	DevOpsLint     *DevOpsLint            // static analysis of Dockerfiles / compose / Helm (nil when none found)
-	K8sLint        *K8sLint               // static analysis of Kubernetes manifests/cluster dumps (nil when none found)
-	FolderAsTab    bool                   // true when --folder-as-tab was used
-	RenderModules  bool                   // true when --render-modules was used
+	Modules        map[string][]FileEntry          // moduleName -> files
+	GitRepos       []string                        // dirs containing .git
+	ProjectTypes   []string                        // distinct detected project types, sorted
+	Technologies   []string                        // tech detected from docker-compose/go.mod/Makefile
+	DockerServices []string                        // service names from docker-compose files
+	DevOpsTools    []DevOpsTool                    // CI/CD, container, orchestration tools
+	DevOpsLint     *DevOpsLint                     // static analysis of Dockerfiles / compose / Helm (nil when none found)
+	K8sLint        *K8sLint                        // static analysis of Kubernetes manifests/cluster dumps (nil when none found)
+	Versions       map[langspec.Platform][]Version // detected runtime/framework versions per platform (see versions.go)
+	FolderAsTab    bool                            // true when --folder-as-tab was used
+	RenderModules  bool                            // true when --render-modules was used
 }
 
 // moduleRoot records a detected module-root directory and the language/project
@@ -222,6 +223,7 @@ func Scan(rootPath string, cfg config.Config, reg *langspec.Registry) (*ScanResu
 	res.DockerServices, res.Technologies = ScanDockerCompose(abs)
 	res.DevOpsTools = ScanDevOps(abs)
 	res.DevOpsLint = ScanDevOpsLint(abs)
+	res.Versions = DetectVersions(abs)
 	res.K8sLint = ScanK8sLint(abs)
 	// Gitrepo-as-tab produces the same "platform:label" synthetic keys
 	// folder-as-tab does (just keyed by containing repo instead of top-level

@@ -10,6 +10,7 @@ import (
 	"github.com/exey/archscope/internal/langspec"
 	"github.com/exey/archscope/internal/parser"
 	"github.com/exey/archscope/internal/result"
+	"github.com/exey/archscope/internal/scanner"
 )
 
 // ── Graph data types (serialized as JSON for force-graph) ────────────────────
@@ -850,6 +851,34 @@ func renderArchComponents(files []*parser.ParsedFile, techSet map[string]bool) s
 	sb.WriteString(`<div class="as-sub" style="margin-top:16px">🧩 Components</div><div class="arch-components">`)
 	for _, c := range components {
 		fmt.Fprintf(&sb, `<span class="arch-component"><span class="comp-icon">%s</span><span>%s</span></span>`, c.icon, esc(c.summary))
+	}
+	sb.WriteString(`</div>`)
+	return sb.String()
+}
+
+// archVersionCategoryLabel is the human heading for a scanner.Version category.
+var archVersionCategoryLabel = map[string]string{
+	"language": "Language", "runtime": "Runtime", "package-manager": "Package manager",
+	"build": "Build", "framework": "Framework", "testing": "Testing", "library": "Library",
+}
+
+// renderArchVersions renders the "Versions" block placed right after the
+// Components list: the manifest-detected version of the runtime, toolchain and
+// key frameworks for this platform (see internal/scanner/versions.go).
+func renderArchVersions(versions []scanner.Version) string {
+	if len(versions) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(`<div class="as-sub" style="margin-top:16px">🔢 Versions</div><div class="arch-versions">`)
+	for _, v := range versions {
+		label := archVersionCategoryLabel[v.Category]
+		if label == "" {
+			label = v.Category
+		}
+		fmt.Fprintf(&sb,
+			`<span class="arch-version" title="%s — from %s"><span class="arch-version__name">%s</span><span class="arch-version__num">%s</span></span>`,
+			esc(label), esc(v.Source), esc(v.Name), esc(v.Version))
 	}
 	sb.WriteString(`</div>`)
 	return sb.String()

@@ -20,6 +20,7 @@ import (
 	"github.com/exey/archscope/internal/langspec"
 	"github.com/exey/archscope/internal/modules"
 	"github.com/exey/archscope/internal/parser"
+	"github.com/exey/archscope/internal/scanner"
 )
 
 // confidenceThreshold is the minimum score for a pattern to be reported.
@@ -113,6 +114,7 @@ type Result struct {
 	Patterns   []Pattern   // client mode
 	Layers     []LayerStat // backend mode
 	Components []Component
+	Versions   []scanner.Version // manifest-detected runtime/framework versions (see scanner/versions.go)
 }
 
 // HasDetection reports whether a pattern cleared the threshold (client mode) or
@@ -129,8 +131,9 @@ func (r Result) HasDetection() bool {
 func (Module) Analyze(files []*parser.ParsedFile) any {
 	imports := importSet(files)
 	components := detectComponents(imports)
+	versions := versionsFromFiles(files)
 	if !clientFiles(files) {
-		return Result{Mode: "backend", Layers: classifyLayers(files), Components: components}
+		return Result{Mode: "backend", Layers: classifyLayers(files), Components: components, Versions: versions}
 	}
 
 	rc := newRoleCounter(files)
@@ -164,7 +167,21 @@ func (Module) Analyze(files []*parser.ParsedFile) any {
 	if len(pats) > 5 {
 		pats = pats[:5]
 	}
-	return Result{Mode: "client", Patterns: pats, Components: components}
+	return Result{Mode: "client", Patterns: pats, Components: components, Versions: versions}
+}
+
+// versionsFromFiles pulls the per-platform version list the pipeline stashes on
+// the first parsed file's Extra bag (see internal/result/pipeline.go).
+func versionsFromFiles(files []*parser.ParsedFile) []scanner.Version {
+	for _, f := range files {
+		if f.Extra == nil {
+			continue
+		}
+		if v, ok := f.Extra["versions"].([]scanner.Version); ok {
+			return v
+		}
+	}
+	return nil
 }
 
 // clientFiles reports whether any file belongs to a client/UI language.
@@ -306,13 +323,19 @@ func (Module) SummaryCards(res any) []modules.SummaryCard {
 			Num: fmt.Sprintf("%d", len(r.Components)), Label: "frameworks",
 		})
 	}
+	for _, v := range r.Versions {
+		if v.Category == "language" || v.Category == "runtime" {
+			cards = append(cards, modules.SummaryCard{Num: v.Version, Label: v.Name})
+			break
+		}
+	}
 	return cards
 }
 
 // RenderMarkdown renders the architecture result as markdown.
 func (Module) RenderMarkdown(res any) string {
 	r, ok := res.(Result)
-	if !ok || !r.HasDetection() {
+	if !ok || (!r.HasDetection() && len(r.Versions) == 0) {
 		return ""
 	}
 	var b strings.Builder
@@ -344,6 +367,19 @@ func (Module) RenderMarkdown(res any) string {
 			} else {
 				fmt.Fprintf(&b, "- %s **%s**\n", c.Icon, c.Name)
 			}
+		}
+		b.WriteString("\n")
+	}
+	if len(r.Versions) > 0 {
+		b.WriteString("#### Versions\n\n")
+		b.WriteString("| Technology | Version | Category |\n")
+		b.WriteString("|------------|---------|----------|\n")
+		for _, v := range r.Versions {
+			label := versionCategoryLabel[v.Category]
+			if label == "" {
+				label = v.Category
+			}
+			fmt.Fprintf(&b, "| %s | %s | %s |\n", v.Name, v.Version, label)
 		}
 		b.WriteString("\n")
 	}
@@ -420,15 +456,43 @@ func (Module) RenderHTML(res any) string {
 		}
 		b.WriteString(`</div></div>`)
 	}
+	b.WriteString(renderVersionsHTML(r.Versions))
 	return b.String()
 }
 
 func esc(s string) string { return html.EscapeString(s) }
 
+// versionCategoryLabel is the human heading for a Version.Category.
+var versionCategoryLabel = map[string]string{
+	"language": "Language", "runtime": "Runtime", "package-manager": "Package manager",
+	"build": "Build", "framework": "Framework", "testing": "Testing", "library": "Library",
+}
+
+// renderVersionsHTML renders the "Versions" block appended after the components
+// list: the manifest-detected version of the runtime, toolchain and frameworks.
+func renderVersionsHTML(versions []scanner.Version) string {
+	if len(versions) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="as-arch__versions"><h5 class="as-sub">🔢 Versions</h5><div class="as-arch__version-grid">`)
+	for _, v := range versions {
+		label := versionCategoryLabel[v.Category]
+		if label == "" {
+			label = v.Category
+		}
+		fmt.Fprintf(&b,
+			`<div class="as-arch__version" title="%s — from %s"><span class="as-arch__version-name">%s</span><span class="as-arch__version-num">%s</span><span class="as-arch__version-cat">%s</span></div>`,
+			esc(label), esc(v.Source), esc(v.Name), esc(v.Version), esc(label))
+	}
+	b.WriteString(`</div></div>`)
+	return b.String()
+}
+
 // renderBackend renders the goscope-style layered architecture view: a Layers
 // column (proportional bars) and a Components column (detected frameworks).
 func renderBackend(r Result) string {
-	if len(r.Layers) == 0 && len(r.Components) == 0 {
+	if len(r.Layers) == 0 && len(r.Components) == 0 && len(r.Versions) == 0 {
 		return `<p class="as-empty">No backend layers detected from file conventions.</p>`
 	}
 	maxLines := 1
@@ -467,6 +531,7 @@ func renderBackend(r Result) string {
 		b.WriteString(`</div>`)
 	}
 	b.WriteString(`</div></div>`)
+	b.WriteString(renderVersionsHTML(r.Versions))
 	return b.String()
 }
 
