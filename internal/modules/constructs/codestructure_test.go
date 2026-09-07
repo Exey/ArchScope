@@ -184,6 +184,65 @@ func TestRenderHTMLIncludesOffendersAndFolderSmells(t *testing.T) {
 	}
 }
 
+func TestLooseAnyObjectTypesCountedForTS(t *testing.T) {
+	src := "export function f(x: any): void {}\n" +
+		"const g = (v: unknown) => v as any;\n" + // "as any"
+		"type R = Record<string, any>;\n" + // ", any"
+		"let m: WeakMap<object, any>;\n" + // "<object" + ", any"
+		"const o = { a: 1 };\n" + // no type -> not counted
+		"function many() { return company; }\n" // "many"/"company" must NOT match
+	f := writeFile(t, ".ts", src)
+	r := csAnalyze([]*parser.ParsedFile{f})
+	if len(r.LooseTypeFiles) != 1 {
+		t.Fatalf("expected 1 file with loose types, got %+v", r.LooseTypeFiles)
+	}
+	u := r.LooseTypeFiles[0]
+	if u.AnyCount != 4 {
+		t.Errorf("any count = %d, want 4 (: any, as any, ,any, ,any)", u.AnyCount)
+	}
+	if u.ObjCount != 1 {
+		t.Errorf("object count = %d, want 1 (<object)", u.ObjCount)
+	}
+	if r.LooseTypeTotal != 5 {
+		t.Errorf("LooseTypeTotal = %d, want 5", r.LooseTypeTotal)
+	}
+	if u.FirstLine != 1 {
+		t.Errorf("FirstLine = %d, want 1", u.FirstLine)
+	}
+}
+
+func TestLooseTypesIgnoredForNonTS(t *testing.T) {
+	// A Go file with ": any" (Go 1.18+ alias) must not feed the TS-only stat.
+	f := writeFile(t, ".go", "package p\nfunc f(x any) {}\nvar m map[string]any\n")
+	r := csAnalyze([]*parser.ParsedFile{f})
+	if r.LooseTypeTotal != 0 || len(r.LooseTypeFiles) != 0 {
+		t.Errorf("Go file should not contribute loose-type stat, got total=%d files=%+v", r.LooseTypeTotal, r.LooseTypeFiles)
+	}
+}
+
+func TestLooseTypesRenderedInHTMLAndMarkdown(t *testing.T) {
+	f := writeFile(t, ".tsx", "const a: any = 1;\nconst b = x as object;\n")
+	r := csAnalyze([]*parser.ParsedFile{f})
+	html := (CodeStructure{}).RenderHTML(r)
+	if !strings.Contains(html, "any / object types") || !strings.Contains(html, "as-cs__table") {
+		t.Errorf("HTML missing loose-type stat/table:\n%s", html)
+	}
+	md := (CodeStructure{}).RenderMarkdown(r)
+	if !strings.Contains(md, "`any` / `object` types:** 2") {
+		t.Errorf("markdown missing loose-type headline:\n%s", md)
+	}
+	cards := (CodeStructure{}).SummaryCards(r)
+	found := false
+	for _, c := range cards {
+		if c.Label == "any / object types" && c.Num == "2" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'any / object types' summary card, got %+v", cards)
+	}
+}
+
 func TestEmptyInputHasNoData(t *testing.T) {
 	r := csAnalyze(nil)
 	if r.HasData() {

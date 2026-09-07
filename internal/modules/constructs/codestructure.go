@@ -69,6 +69,36 @@ type CSFolderStat struct {
 	Count int
 }
 
+// CSAnyUsage is one TS/JS file's count of loose `any` / `object` type
+// annotations — the escape hatches that switch off static typing.
+type CSAnyUsage struct {
+	FilePath  string
+	FirstLine int // line of the first occurrence, for the deep link
+	AnyCount  int
+	ObjCount  int
+}
+
+// Total is the file's combined loose-type count.
+func (u CSAnyUsage) Total() int { return u.AnyCount + u.ObjCount }
+
+// reLooseAny / reLooseObject match `any` and `object`/`Object` in TypeScript
+// *type* position — after `:` `<` `,` `|` `&` or `as` — so a variable or
+// property that merely happens to be named "any" is not counted, and neither
+// is `Object.keys(...)`. Applied to comment/string-stripped lines.
+var (
+	reLooseAny    = regexp.MustCompile(`(?::|<|,|\||&|\bas)\s*any\b`)
+	reLooseObject = regexp.MustCompile(`(?::|<|,|\||&|\bas)\s*(?:object|Object)\b`)
+)
+
+// csTSExtensions are the file extensions the loose-type scan runs on.
+var csTSExtensions = map[string]bool{
+	".ts": true, ".tsx": true, ".mts": true, ".cts": true,
+	".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
+}
+
+// csMaxAnyListShown caps the loose-type file list.
+const csMaxAnyListShown = 15
+
 // CodeStructureReport is the module output.
 type CodeStructureReport struct {
 	HighParamFuncs []CSFuncOffender // params > csMaxParams
@@ -77,6 +107,9 @@ type CodeStructureReport struct {
 
 	CommentPercent    int // 0–100, lines that are comment-only ÷ total lines
 	PreprocDirectives int // total #define/#include/#if.../Swift #if.../… lines
+
+	LooseTypeTotal int          // total `any` + `object` type annotations (TS/JS only)
+	LooseTypeFiles []CSAnyUsage // per-file loose-type counts, sorted worst-first
 
 	OvercrowdedFolders []CSFolderStat // folders with > csOvercrowdedFolder files
 	EmptyFolders       []string       // container-only folders (no files of their own)
@@ -220,6 +253,25 @@ func countTopLevelCommas(sig string) int {
 	return count
 }
 
+// scanLooseTypes counts `any` and `object`/`Object` type annotations across a
+// file's comment/string-stripped lines and records where the first one is.
+func scanLooseTypes(filePath string, stripped []string) CSAnyUsage {
+	u := CSAnyUsage{FilePath: filePath}
+	for i, line := range stripped {
+		anyN := len(reLooseAny.FindAllStringIndex(line, -1))
+		objN := len(reLooseObject.FindAllStringIndex(line, -1))
+		if anyN+objN == 0 {
+			continue
+		}
+		if u.FirstLine == 0 {
+			u.FirstLine = i + 1
+		}
+		u.AnyCount += anyN
+		u.ObjCount += objN
+	}
+	return u
+}
+
 // Analyze reads each file's raw and comment/string-stripped lines and derives
 // the parameter-count, nesting-depth, comment-density, preprocessor-density,
 // and folder-layout signals.
@@ -266,6 +318,13 @@ func (CodeStructure) Analyze(files []*parser.ParsedFile) any {
 			}
 		}
 
+		if csTSExtensions[ext(f.FilePath)] {
+			if u := scanLooseTypes(f.FilePath, stripped); u.Total() > 0 {
+				rep.LooseTypeTotal += u.Total()
+				rep.LooseTypeFiles = append(rep.LooseTypeFiles, u)
+			}
+		}
+
 		for _, fr := range csFuncRanges(stripped) {
 			nest := nestDepthOf(stripped, fr.start, fr.end)
 			if nest > rep.WorstNest.Value {
@@ -287,6 +346,7 @@ func (CodeStructure) Analyze(files []*parser.ParsedFile) any {
 	}
 	sort.SliceStable(rep.HighParamFuncs, func(i, j int) bool { return rep.HighParamFuncs[i].Value > rep.HighParamFuncs[j].Value })
 	sort.SliceStable(rep.DeepNestFuncs, func(i, j int) bool { return rep.DeepNestFuncs[i].Value > rep.DeepNestFuncs[j].Value })
+	sort.SliceStable(rep.LooseTypeFiles, func(i, j int) bool { return rep.LooseTypeFiles[i].Total() > rep.LooseTypeFiles[j].Total() })
 
 	analyzeFolderLayout(files, &rep)
 	return rep
@@ -359,6 +419,9 @@ func (CodeStructure) SummaryCards(res any) []modules.SummaryCard {
 	if r.WorstNest.Value > 0 {
 		cards = append(cards, modules.SummaryCard{Num: strconv.Itoa(r.WorstNest.Value), Label: "max nesting"})
 	}
+	if r.LooseTypeTotal > 0 {
+		cards = append(cards, modules.SummaryCard{Num: strconv.Itoa(r.LooseTypeTotal), Label: "any / object types"})
+	}
 	return cards
 }
 
@@ -373,6 +436,9 @@ func (CodeStructure) RenderMarkdown(res any) string {
 	fmt.Fprintf(&b, "**Comments:** %d%% · **Worst nesting:** %d", r.CommentPercent, r.WorstNest.Value)
 	if r.PreprocDirectives > 0 {
 		fmt.Fprintf(&b, " · **Preprocessor directives:** %d", r.PreprocDirectives)
+	}
+	if r.LooseTypeTotal > 0 {
+		fmt.Fprintf(&b, " · **`any` / `object` types:** %d", r.LooseTypeTotal)
 	}
 	b.WriteString("\n\n")
 
@@ -392,6 +458,18 @@ func (CodeStructure) RenderMarkdown(res any) string {
 	}
 	writeOffenders("High-parameter functions", r.HighParamFuncs)
 	writeOffenders("Deeply nested functions", r.DeepNestFuncs)
+
+	if len(r.LooseTypeFiles) > 0 {
+		fmt.Fprintf(&b, "`any` / `object` types by file (%d total)\n\n| File | any | object | Location |\n|------|----:|-------:|----------|\n", r.LooseTypeTotal)
+		for i, u := range r.LooseTypeFiles {
+			if i == csMaxAnyListShown {
+				fmt.Fprintf(&b, "| | | | +%d more |\n", len(r.LooseTypeFiles)-csMaxAnyListShown)
+				break
+			}
+			fmt.Fprintf(&b, "| %s | %d | %d | %s:%d |\n", baseName(u.FilePath), u.AnyCount, u.ObjCount, baseName(u.FilePath), u.FirstLine)
+		}
+		b.WriteString("\n")
+	}
 
 	if r.HasFolderSmells() {
 		b.WriteString("Folder-structure smells:\n\n")
@@ -431,10 +509,14 @@ func (CodeStructure) RenderHTML(res any) string {
 	if r.PreprocDirectives > 0 {
 		writeCSStat(&b, strconv.Itoa(r.PreprocDirectives), "preprocessor directives", "var(--text-dim)")
 	}
+	if r.LooseTypeTotal > 0 {
+		writeCSStat(&b, strconv.Itoa(r.LooseTypeTotal), "any / object types", healthColor(100-r.LooseTypeTotal*2))
+	}
 	b.WriteString(`</div>`)
 
 	writeCSOffenders(&b, fmt.Sprintf("Functions with too many parameters (&gt; %d)", csMaxParams), "PARAMS", r.HighParamFuncs)
 	writeCSOffenders(&b, fmt.Sprintf("Deeply nested functions (&gt; %d levels)", csMaxNestDepth), "DEPTH", r.DeepNestFuncs)
+	writeCSLooseTypes(&b, r.LooseTypeFiles, r.LooseTypeTotal)
 
 	if r.HasFolderSmells() {
 		b.WriteString(`<div class="as-cs__viol-title">🗑️ Folder structure smells</div><ul class="as-cs__folders">`)
@@ -452,6 +534,26 @@ func (CodeStructure) RenderHTML(res any) string {
 
 	b.WriteString(`</div>`)
 	return b.String()
+}
+
+// writeCSLooseTypes renders the top loose-`any`/`object`-type files as a table,
+// laid out like the nesting/parameter offender tables.
+func writeCSLooseTypes(b *strings.Builder, files []CSAnyUsage, total int) {
+	if len(files) == 0 {
+		return
+	}
+	fmt.Fprintf(b, `<div class="as-cs__viol-title">Loose <span class="mono">any</span> / <span class="mono">object</span> types <span class="as-count">(%d in %d files)</span></div>`, total, len(files))
+	b.WriteString(`<table class="as-table as-cs__table"><thead><tr><th>File</th><th>any</th><th>object</th><th>Location</th></tr></thead><tbody>`)
+	for i, u := range files {
+		if i == csMaxAnyListShown {
+			fmt.Fprintf(b, `<tr><td colspan="4" class="as-cs__more">… and %d more</td></tr>`, len(files)-csMaxAnyListShown)
+			break
+		}
+		loc := occurrenceLink(fmt.Sprintf("%s:%d", baseName(u.FilePath), u.FirstLine), u.FilePath, u.FirstLine)
+		fmt.Fprintf(b, `<tr><td class="mono">%s</td><td class="mono">%d</td><td class="mono">%d</td><td class="mono">%s</td></tr>`,
+			html.EscapeString(baseName(u.FilePath)), u.AnyCount, u.ObjCount, loc)
+	}
+	b.WriteString(`</tbody></table>`)
 }
 
 func writeCSStat(b *strings.Builder, val, label, color string) {
